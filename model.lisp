@@ -185,7 +185,8 @@
 				     "function"
 				     (j "name" (tool-call-name c)
 					"arguments" (lisp-to-json-string
-						     (tool-call-args c)))))
+						     (args-object
+						      (tool-call-args c))))))
 				(turn-calls turn)))))))))
 
 (defun openai-parse (raw)
@@ -244,7 +245,7 @@
 				(j "type"  "tool_use"
 				   "id"    (tool-call-id c)
 				   "name"  (tool-call-name c)
-				   "input" (tool-call-args c)))
+				   "input" (args-object (tool-call-args c))))
 			      (turn-calls turn))))))))
 
 (defun anthropic-parse (raw)
@@ -306,7 +307,8 @@
 		       (j "type"      "function_call"
 			  "call_id"   (tool-call-id c)
 			  "name"      (tool-call-name c)
-			  "arguments" (lisp-to-json-string (tool-call-args c))))
+			  "arguments" (lisp-to-json-string
+				       (args-object (tool-call-args c)))))
 		     (turn-calls turn))))))
 
 (defun openai-responses-parse (raw)
@@ -367,18 +369,16 @@
 		    (j "type"      "function_call"
 		       "id"        (tool-call-id c)
 		       "name"      (tool-call-name c)
-		       "arguments" (or (tool-call-args c) (make-hash-table))
+		       "arguments" (args-object (tool-call-args c))
 		       "signature" *gemini-unsigned-signature*))
 		  (turn-calls turn))))
 
 (defun gemini-fix-args (step)
-  "CL-JSON decodes {} to NIL and encodes NIL back as null, but Gemini
-   requires function_call arguments to be an object."
-  (if (and (equal (s step "type") "function_call")
-	   (null (s step "arguments")))
+  "A replayed function_call's arguments forced back into object shape."
+  (if (equal (s step "type") "function_call")
       (mapcar (lambda (pair)
 		(if (eq (car pair) :arguments)
-		    (cons :arguments (make-hash-table))
+		    (cons :arguments (args-object (cdr pair)))
 		    pair))
 	      step)
       step))

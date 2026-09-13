@@ -3,37 +3,8 @@
 (in-package #:apprentice)
 
 
-;;;; Formatting
+;;;; Strings
 
-
-(defmethod json:encode-json ((x (eql :false)) &optional stream)
-  "CL-JSON maps NIL to null, and a NIL alist value collapses into a
-   one-element list encoding as an array, so false needs a marker."
-  (write-string "false" stream))
-
-(defun lisp-to-json-string (data)
-  "Key symbols take cl-json's usual mapping, which round-trips decoded
-   messages: :ROLE back to role, :REASONING--CONTENT to reasoning_content."
-  (with-output-to-string (s)
-    (json:encode-json data s)))
-
-(defun lisp-to-verbatim-json-string (data)
-  "Key symbols emitted exactly as named, for APIs wanting literal
-   camelCase: the default encoder downcases numResults. Only safe for
-   hand-built alists, never for anything cl-json decoded."
-  (with-output-to-string (s)
-    (let ((json:*lisp-identifier-name-to-json* #'string))
-      (json:encode-json data s))))
-
-(defun alist-p (x)
-  (and (consp x) (consp (first x)) (atom (car (first x)))))
-
-(defun expand-dir (dir)
-  (let ((path (uiop:ensure-absolute-pathname
-	       (uiop:ensure-directory-pathname dir)
-	       #'uiop:getcwd)))
-    (uiop:native-namestring
-     (or (ignore-errors (uiop:resolve-symlinks path)) path))))
 
 (defun starts-with-p (string prefix)
   "True when STRING begins with PREFIX."
@@ -51,6 +22,19 @@
                      (substitute-subseq (subseq string (+ pos (length old)))
                                         old new :test test))
         string)))
+
+(defun count-subseq (needle haystack)
+  "How many non-overlapping times NEEDLE occurs in HAYSTACK. An empty
+   NEEDLE counts as zero rather than looping forever."
+  (if (zerop (length needle))
+      0
+      (loop with count = 0
+	    with start = 0
+	    for pos = (search needle haystack :start2 start)
+	    while pos
+	    do (incf count)
+	       (setf start (+ pos (length needle)))
+	    finally (return count))))
 
 (defun one-line (string)
   "STRING with every run of whitespace collapsed to a single space, so a
@@ -73,6 +57,46 @@
       string
       (format nil "~a... (+~a chars)"
 	      (subseq string 0 limit) (- (length string) limit))))
+
+
+;;;; Lines
+
+
+(defun file-lines (string)
+  "Splits STRING into lines by new-line."
+  (let ((parts (uiop:split-string string :separator (list #\Newline))))
+    (if (and (> (length parts) 1)
+	     (string= (car (last parts)) ""))
+	(values (butlast parts) t)
+	(values parts nil))))
+
+(defun numbered-window (lines from to)
+  "LINES from FROM to TO, inclusive and 1-based, numbered exactly as the
+   READ tool numbers them so the two can be read side by side."
+  (let* ((n  (length lines))
+	 (lo (max 1 from))
+	 (hi (min to n)))
+    (if (> lo hi)
+	""
+	(format nil "~{~a~^~%~}"
+		(loop for line in (subseq lines (1- lo) hi)
+		      for i from lo
+		      collect (format nil "~5d~a~a" i #\Tab line))))))
+
+
+;;;; Paths
+
+
+(defun expand-dir (dir)
+  (let ((path (uiop:ensure-absolute-pathname
+	       (uiop:ensure-directory-pathname dir)
+	       #'uiop:getcwd)))
+    (uiop:native-namestring
+     (or (ignore-errors (uiop:resolve-symlinks path)) path))))
+
+
+;;;; Index Specs
+
 
 (defun expand-index-specs (specs n)
   "The indices named by SPECS over a sequence of N items, sorted and
@@ -97,6 +121,29 @@
 		do (pushnew i out)))))
     (sort out #'<)))
 
+
+;;;; JSON Encoding
+
+
+(defmethod json:encode-json ((x (eql :false)) &optional stream)
+  "CL-JSON maps NIL to null, and a NIL alist value collapses into a
+   one-element list encoding as an array, so false needs a marker."
+  (write-string "false" stream))
+
+(defun lisp-to-json-string (data)
+  "Key symbols take cl-json's usual mapping, which round-trips decoded
+   messages: :ROLE back to role, :REASONING--CONTENT to reasoning_content."
+  (with-output-to-string (s)
+    (json:encode-json data s)))
+
+(defun lisp-to-verbatim-json-string (data)
+  "Key symbols emitted exactly as named, for APIs wanting literal
+   camelCase: the default encoder downcases numResults. Only safe for
+   hand-built alists, never for anything cl-json decoded."
+  (with-output-to-string (s)
+    (let ((json:*lisp-identifier-name-to-json* #'string))
+      (json:encode-json data s))))
+
 (defun lisp-to-corrected-json-string (data)
   (substitute-subseq
    (lisp-to-json-string data)
@@ -104,8 +151,31 @@
    ":false"
    :test #'string=))
 
+(defun alist-p (x)
+  (and (consp x) (consp (first x)) (atom (car (first x)))))
 
-;;;; Ease-of-Use JSON Functions
+(defun json-key-name (symbol)
+  "SYMBOL as the JSON key it was decoded from. CL-JSON maps an
+   underscore to a double dash, so \"start_offset\" arrives as
+   :START--OFFSET; undoing that before single dashes keeps it from
+   coming back as start__offset."
+  (substitute #\_ #\-
+	      (substitute-subseq (string-downcase (symbol-name symbol))
+				 "--" "_")))
+
+(defun args-object (args)
+  "A decoded arguments alist as a hash table, which always encodes as a
+   JSON object."
+  (let ((table (make-hash-table :test #'equal)))
+    (when (listp args)
+      (dolist (pair args)
+	(when (consp pair)
+	  (setf (gethash (json-key-name (car pair)) table)
+		(cdr pair)))))
+    table))
+
+
+;;;; JSON Access
 
 
 (defun j (&rest plist)

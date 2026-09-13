@@ -28,19 +28,64 @@
 	"(no output)"
 	result)))
 
+(defvar *trace-lock* (bt:make-lock "apprentice-trace")
+  "Held while one call's trace is printed, so parallel calls do not
+   interleave mid-line.")
+
+(defparameter *max-parallel-calls* 1
+  "Tool calls from one turn allowed to run at once. One by default:
+   concurrent edit or bash calls touching the same file corrupt it, so
+   only a loop that knows its tools are safe should raise this.")
+
+(defun call-triple (call tools out)
+  "One call run and traced, as its (ID NAME OUTPUT) triple."
+  (let* ((name   (tool-call-name call))
+	 (args   (tool-call-args call))
+	 (result (handler-case (tool-output name args tools)
+		   (error (e) (format nil "Tool ~a failed: ~a" name e)))))
+    (bt:with-lock-held (*trace-lock*)
+      (format out "~&→ ~a ~s~%~a~%" name args result)
+      (finish-output out))
+    (list (tool-call-id call) name result)))
+
 (defun run-calls (calls tools)
-  "List of (ID NAME OUTPUT) per call. One turn's results travel
-   together: some providers require them batched into a single message,
-   and some need the function name alongside the id."
-  (loop for call in calls
-	for name   = (tool-call-name call)
-	for args   = (tool-call-args call)
-	for result = (tool-output name args tools)
-	do (format t "~&→ ~a ~s~%~a~%" name args result)
-	collect (list (tool-call-id call) name result)))
+  "List of (ID NAME OUTPUT) per call, in the order CALLS were given even
+   when they run at once. One turn's results travel together: some
+   providers require them batched into a single message, and some need
+   the function name alongside the id."
+  (if (or (<= *max-parallel-calls* 1) (null (rest calls)))
+      (mapcar (lambda (c) (call-triple c tools *standard-output*)) calls)
+      (let* ((vec     (coerce calls 'vector))
+	     (n       (length vec))
+	     (results (make-array n :initial-element nil))
+	     (out     *standard-output*)
+	     (dirs    *allowed-dirs*)
+	     (anchor  *anchor-dir*)
+	     (anchors *anchors*)
+	     (model   *subagent-model*)
+	     (kit     *subagent-tools*))
+	(loop for start from 0 below n by *max-parallel-calls*
+	      do (mapc
+		  #'bt:join-thread
+		  (loop for i from start
+			  below (min n (+ start *max-parallel-calls*))
+			collect
+			(let ((i i))
+			  (bt:make-thread
+			   (lambda ()
+			     (let ((*allowed-dirs*   dirs)
+				   (*anchor-dir*     anchor)
+				   (*anchors*        anchors)
+				   (*subagent-model* model)
+				   (*subagent-tools* kit))
+			       (setf (aref results i)
+				     (call-triple (aref vec i) tools out))))
+			   :name "apprentice-tool-call")))))
+	(coerce results 'list))))
 
 (defparameter *loop-keys*
-  '(:model :system-prompt :system :tools :max-turns :history)
+  '(:model :system-prompt :system :tools :max-turns :history
+    :max-parallel-calls :escalate-after)
   "Keys the loops consume themselves. CHECK-OPTIONS rejects any option
    the model does not declare, so these must not reach it.")
 
@@ -55,6 +100,24 @@
       (append history (list (make-turn :role :user :text prompt)))
       (list (make-turn :role :system :text system)
 	    (make-turn :role :user   :text prompt))))
+
+(defun current-tools (tools)
+  "TOOLS, or what calling it returns when a loop was handed a function,
+   so a tool set can change as a run goes on."
+  (if (functionp tools) (funcall tools) tools))
+
+(defun force-final-answer (model msgs max-turns &rest options)
+  "One last call with the tools taken away, so the model has to answer in
+   prose rather than reach for another one. Returns the (CONTENT MSGS)
+   pair a loop returns."
+  (let* ((nudge (make-turn
+		 :role :user
+		 :text (format nil "You have used all ~a of your turns and cannot call any more tools. Answer now with what you already have: report what you found or changed so far." max-turns)))
+	 (msgs  (append msgs (list nudge)))
+	 (turn  (apply #'run-model model msgs nil options)))
+    (list (or (turn-text turn)
+	      (format nil "[stopped: hit max-turns (~a)]" max-turns))
+	  (append msgs (list turn)))))
 
 
 ;;;; Standard Agent Loop
@@ -73,17 +136,18 @@
   (let ((opts (model-options options))
 	(msgs (seed-messages system-prompt prompt history)))
     (loop repeat max-turns do
-      (let ((turn (apply #'run-model model msgs tools opts)))
+      (let* ((kit  (current-tools tools))
+	     (turn (apply #'run-model model msgs kit opts)))
 	(when (eq (turn-stop turn) :error)
 	  (return (list (turn-text turn) msgs)))
 	(setf msgs (append msgs (list turn)))
 	(if (turn-calls turn)
 	    (setf msgs (append msgs (list (make-turn
 					    :role :tool-results
-					    :results (run-calls (turn-calls turn) tools)))))
+					    :results (run-calls (turn-calls turn) kit)))))
 	    (return (list (turn-text turn) msgs))))
-	  finally (return (list (format nil "[stopped: hit max-turns (~a)]" max-turns)
-				msgs)))))
+	  finally (return (apply #'force-final-answer
+				 model msgs max-turns opts)))))
 
 
 ;;;; Little Coder Agent Loop
@@ -127,8 +191,8 @@
 					   :role :tool-results
 					   :results (run-calls (turn-calls turn) tools))))))
 	  (t (return (list (turn-text turn) msgs)))))
-	  finally (return (list (format nil "[stopped: hit max-turns (~a)]" max-turns)
-				msgs)))))
+	  finally (return (apply #'force-final-answer
+				 model msgs max-turns :thinking nil opts)))))
 
 ;;;; Apprentice Agent Loop
 ;;;;
@@ -146,13 +210,35 @@ A subagent starts with no memory of this conversation, and nothing carries over 
 
 Tell every subagent to answer briefly, findings and evidence only with no narration, since anything past the limit is lost. When you delegate a change, ask for the file path, the line numbers, and only the lines that changed, quoted. When you delegate an investigation, ask for the specific answer with file paths and line numbers, quoting only the lines that carry it. If a reply comes back marked as truncated, do not ask for it again in full; ask a narrower question instead.
 
-Give each subagent one focused task, and split larger work into several calls. When the work is done, answer the user with a summary of what changed, citing the evidence the subagents reported.")
+Give each subagent one focused task, and split larger work into several. Send independent tasks together in one call so they run at the same time, but never give two of them the same file to edit.
+
+Pass turns with every call and size it to the task: three or four for a lookup or a question about one file, eight to twelve for a change that spans several. A subagent that runs out of turns still reports what it has, so a tight budget costs you a partial answer rather than nothing, and it brings the work back to you sooner. Prefer several small tasks over one long one.
+
+When the work is done, answer the user with a summary of what changed, citing the evidence the subagents reported.")
+
+(defparameter *escalate-after* 10
+  "Subagent tasks after which the primary is handed the standard tool
+   kit. A run that is not converging through delegation can then work
+   directly instead of grinding on.")
 
 (defun apprentice-loop (prompt &rest options
 			&key (system-prompt *apprentice-prompt*)
 			     (tools *apprentice-tools*)
+			     (max-parallel-calls 3)
+			     (escalate-after *escalate-after*)
 			&allow-other-keys)
-  (apply #'standard-loop prompt
-	 :system-prompt system-prompt
-	 :tools tools
-	 options))
+  (let ((*max-parallel-calls* max-parallel-calls)
+	(announced nil))
+    (setf *subagent-calls* 0)
+    (apply #'standard-loop prompt
+	   :system-prompt system-prompt
+	   :tools (lambda ()
+		    (if (< *subagent-calls* escalate-after)
+			tools
+			(progn
+			  (unless announced
+			    (setf announced t)
+			    (format t "~&⇧ ~a subagent tasks run: the standard tool kit is now available~%"
+				    *subagent-calls*))
+			  *standard-tools*)))
+	   options)))

@@ -94,6 +94,19 @@
 ;;;; Tool Macros
 
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun param-schema-form (ptype pdesc)
+    "Expansion-time: one parameter's JSON schema. A type written as
+     (:array :string) also gets the items schema an array needs, since
+     providers reject an array without one."
+    (if (consp ptype)
+	`(j "type"        ,(string-downcase (symbol-name (first ptype)))
+	    "description" ,pdesc
+	    "items"       (j "type" ,(string-downcase
+				      (symbol-name (second ptype)))))
+	`(j "type"        ,(string-downcase (symbol-name ptype))
+	    "description" ,pdesc))))
+
 (defmacro deftool (name description params &key checks fn)
   (let* ((name-string (string-downcase (symbol-name name)))
          (tool-var (intern (format nil "*~:@(~a~)-TOOL*" name)))
@@ -120,8 +133,7 @@
                      "properties"
                      (or (j ,@(loop for (pname ptype pdesc) in all
                                append (list (string-downcase (symbol-name pname))
-                                           `(j "type" ,(string-downcase (symbol-name ptype))
-                                               "description" ,pdesc))))
+                                            (param-schema-form ptype pdesc))))
                          (make-hash-table))
                      "required"
                      (vector ,@(mapcar (lambda (p) (string-downcase
@@ -178,7 +190,7 @@
         (with-open-file (out path :direction :output :if-exists :supersede
                                   :if-does-not-exist :create :external-format :utf-8)
           (write-string content out))
-        (format nil "Wrote ~a lines to ~a" (1+ (count #\Newline content)) path)))
+        (format nil "Wrote ~a line~:p to ~a" (length (file-lines content)) path)))
 
 (deftool bash
     "Run a shell command in the repository directory. Returns combined stdout and stderr."
@@ -215,7 +227,7 @@
      (limit :integer "Maximum number of results to return, default 5")
      (mode  :string "Search type: auto, fast, instant, deep-lite, deep, or deep-reasoning. Default auto."))
   :checks (((uiop:getenv "EXA_API_KEY") "EXA_API_KEY environment variable is not set"))
-  :fn (let* ((body (lisp-to-json-string
+  :fn (let* ((body (lisp-to-verbatim-json-string
 		    (j "query" query
 		       "type" (or mode "auto")
 		       "numResults" (or limit 5)
@@ -408,7 +420,21 @@
 (defparameter *subagent-loop* :little-coder
   "Which loop the subagent runs.")
 
-(defparameter *subagent-max-turns* 20)
+(defparameter *subagent-max-turns* 8
+  "Turns a subagent gets when a call does not name its own budget. Small
+   on purpose: the primary sees a result sooner and can redirect, and a
+   short context is where a small model is at its best.")
+
+(defparameter *subagent-calls* 0
+  "Subagent tasks run since the current loop started. A plain global that
+   is SETF back to zero, never rebound: parallel subagents run in threads,
+   and a thread does not inherit dynamic bindings, so a LET here would
+   leave the count stuck at zero.")
+
+(defvar *subagent-count-lock* (bt:make-lock "apprentice-subagent-count"))
+
+(defun note-subagent-call ()
+  (bt:with-lock-held (*subagent-count-lock*) (incf *subagent-calls*)))
 
 (defparameter *subagent-prompt*
   "You are a subagent. Another agent, which cannot read or change files itself, has delegated one task to you. Do it with your tools, always using absolute paths. When you are finished, reply with a concise, self-contained report: what you found or changed, with file paths and line numbers, quoting the relevant code when the task asks about it. The other agent sees only this final reply, never your tool calls or their output.")
@@ -424,40 +450,150 @@
 (defparameter *subagent-tool-names* '("subagent" "subagent-brief")
   "Withheld from a subagent, so one cannot delegate further.")
 
-(defun run-subagent (task limit)
-  "TASK run on the subagent model, its report cut to LIMIT characters."
+(defparameter *max-parallel-subagents* 3
+  "Subagents allowed to run at the same time.")
+
+(defun run-subagent-1 (task limit turns)
+  "TASK run on the subagent model, its report cut to LIMIT characters.
+   TURNS overrides *SUBAGENT-MAX-TURNS* when given."
   (let ((tools (remove-if (lambda (tl)
 			    (member (tool-name tl) *subagent-tool-names*
 				    :test #'string=))
 			  *subagent-tools*)))
-    (format t "~&⇢ subagent (~a, ~(~a~) loop): ~a~%"
-	    (model-name *subagent-model*) *subagent-loop* task)
+    (note-subagent-call)
+    (bt:with-lock-held (*trace-lock*)
+      (format t "~&⇢ subagent (~a, ~(~a~) loop, ~a turns): ~a~%"
+	      (model-name *subagent-model*) *subagent-loop*
+	      (or turns *subagent-max-turns*) task)
+      (finish-output))
     (destructuring-bind (content msgs)
 	(funcall (resolve-loop *subagent-loop*) task
 		 :model *subagent-model*
 		 :system-prompt *subagent-prompt*
 		 :system *subagent-prompt*
 		 :tools tools
-		 :max-turns *subagent-max-turns*)
+		 :max-turns (or turns *subagent-max-turns*))
       (declare (ignore msgs))
-      (truncate-output (or content "(the subagent returned no report)")
+      ;; "" is true in Lisp, so OR alone lets an empty report through as
+      ;; a blank line the caller cannot interpret.
+      (truncate-output (if (and (stringp content) (string/= content ""))
+			   content
+			   "(the subagent returned no report)")
 		       limit))))
 
+(defun run-subagents (tasks limit turns)
+  "TASKS run on the subagent model, *MAX-PARALLEL-SUBAGENTS* at a time.
+   Reports come back in the order the tasks were given, never the order
+   they finished. A thread does not inherit the caller's dynamic
+   bindings, so every special a subagent reads is captured here and
+   rebound inside the thread."
+  (let* ((tasks (if (stringp tasks)
+		    (list tasks)
+		    (remove-if-not #'stringp tasks)))
+	 (n (length tasks)))
+    (cond
+      ((zerop n) "No tasks were given. Send tasks as a list of strings.")
+      ((= n 1) (run-subagent-1 (first tasks) limit turns))
+      (t
+       (let ((vec     (coerce tasks 'vector))
+	     (results (make-array n :initial-element nil))
+	     (out     *standard-output*)
+	     (dirs    *allowed-dirs*)
+	     (anchor  *anchor-dir*)
+	     (model   *subagent-model*)
+	     (kit     *subagent-tools*)
+	     (lp      *subagent-loop*)
+	     (prompt  *subagent-prompt*)
+	     (turns*  *subagent-max-turns*))
+	 (loop for start from 0 below n by *max-parallel-subagents*
+	       do (mapc
+		   #'bt:join-thread
+		   (loop for i from start
+			   below (min n (+ start *max-parallel-subagents*))
+			 collect
+			 (let ((i i))
+			   (bt:make-thread
+			    (lambda ()
+			      (let ((*standard-output*    out)
+				    (*allowed-dirs*       dirs)
+				    (*anchor-dir*         anchor)
+				    (*subagent-model*     model)
+				    (*subagent-tools*     kit)
+				    (*subagent-loop*      lp)
+				    (*subagent-prompt*    prompt)
+				    (*subagent-max-turns* turns*))
+				(setf (aref results i)
+				      (handler-case
+					  (run-subagent-1 (aref vec i) limit turns)
+					(error (e)
+					  (format nil "Subagent failed: ~a" e))))))
+			    :name "apprentice-subagent")))))
+	 (format nil "~{~a~^~%~%~}"
+		 (loop for i below n
+		       collect (format nil "--- task ~a of ~a ---~%~a"
+				       (1+ i) n (aref results i)))))))))
+
 (deftool subagent
-    "Delegate a task to a subagent that can read, write and edit files and run shell commands. It starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Returns the subagent's final report."
-    ((task :string "The complete, self-contained instruction for the subagent"))
+    "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together, so send independent pieces of work in one call rather than one at a time. Each subagent starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Never give two tasks in the same call the same file to edit, since they would overwrite each other."
+    ((tasks (:array :string) "One complete, self-contained instruction per subagent")
+     &optional
+     (turns :integer "How many turns each subagent may take before it must answer with whatever it has"))
   :checks ((*subagent-model* "No subagent model is configured.")
 	   ((resolve-loop *subagent-loop*)
 	    (format nil "Unknown subagent loop ~s." *subagent-loop*)))
-  :fn (run-subagent task *subagent-report-limit*))
+  :fn (run-subagents tasks *subagent-report-limit* turns))
 
 (deftool subagent-brief
-    "Delegate a task to a subagent that can read, write and edit files and run shell commands. It starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Its reply is cut short after a small number of characters, so ask it for a brief report -- findings and evidence only, no narration -- or the end of its answer is lost."
-    ((task :string "The complete, self-contained instruction for the subagent"))
+    "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together, so send independent pieces of work in one call rather than one at a time. Each subagent starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Never give two tasks in the same call the same file to edit, since they would overwrite each other. Each reply is cut short after a small number of characters, so ask for brief reports -- findings and evidence only, no narration -- or the ends of the answers are lost."
+    ((tasks (:array :string) "One complete, self-contained instruction per subagent")
+     &optional
+     (turns :integer "How many turns each subagent may take before it must answer with whatever it has"))
   :checks ((*subagent-model* "No subagent model is configured.")
 	   ((resolve-loop *subagent-loop*)
 	    (format nil "Unknown subagent loop ~s." *subagent-loop*)))
-  :fn (run-subagent task *subagent-brief-limit*))
+  :fn (run-subagents tasks *subagent-brief-limit* turns))
+
+
+;;;; Apprentice Tools
+
+
+(deftool apprentice-replace
+  "Replace an exact piece of text in a file. Quote the old text exactly as it appears, indentation included, and give enough of the surrounding lines that it occurs only once in the file. Use it to change lines, to add lines (quote a nearby line and write it back with your addition beside it), and to delete lines (leave the new text empty)."
+  ((path :string "Absolute path of the file to edit")
+   (old  :string "The exact text to replace, copied character for character out of the file, with its indentation and without the line numbers the read tool prints. It must occur exactly once")
+   (new  :string "The text to put in its place. Leave it empty to delete the old text"))
+  :checks (((is-allowed-path *allowed-dirs* path)
+	    (format nil "Not allowed to edit at this path. Allowed dirs: ~a"
+		    (format nil "~{~A~^, ~}" *allowed-dirs*)))
+	   ((uiop:file-exists-p path)
+	    "File does not exist. To write a new file, use the write tool.")
+	   ((string/= old "") "The old text cannot be empty."))
+  :fn (let* ((original (uiop:read-file-string path :external-format :utf-8))
+	     (hits     (count-subseq old original)))
+	(cond
+	  ((zerop hits)
+	   "That text does not appear in the file. Copy it exactly as the read tool shows it, keeping the indentation and leaving out the line numbers.")
+	  ((> hits 1)
+	   (format nil "That text appears ~a times, so it is ambiguous. Quote more of the lines around it until it occurs only once."
+		   hits))
+	  (t
+	   (let* ((pos    (search old original))
+		  (result (concatenate 'string
+				       (subseq original 0 pos)
+				       new
+				       (subseq original (+ pos (length old)))))
+		  (line   (1+ (count #\Newline original :end pos)))
+		  (added  (if (string= new "") 0 (length (file-lines new)))))
+	     (with-open-file (out path :direction :output
+				       :if-exists :supersede
+				       :external-format :utf-8)
+	       (write-string result out))
+	     (format nil "Replaced the text at line ~a of ~a with ~a line~:p. ~
+			  It now reads:~%~a"
+		     line path added
+		     (numbered-window (file-lines result)
+				      (- line 3)
+				      (+ line added 2))))))))
 
 
 ;;;; Tool Bundles
@@ -471,10 +607,8 @@
 	*little-coder-bash-tool* *web-search-tool*))
 
 (defparameter *subagent-tools*
-  (substitute *bash-tool* *little-coder-bash-tool* *little-coder-tools*)
-  "The little-coder tools, but with unrestricted bash in place of the
-   whitelisted one, so a subagent can run any shell command. Declared in
-   state.lisp, since RUN-SUBAGENT reads it above.")
+  (list *grep-tool* *read-tool* *write-tool* *apprentice-replace-tool*
+	*bash-tool* *web-search-tool*))
 
 (defparameter *apprentice-tools*
   (list *grep-tool* *web-search-tool* *dense-vector-search-tool* *file-tree-tool*
