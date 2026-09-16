@@ -8,7 +8,7 @@
 (defvar *chunk-overlap* 50)
 
 (defstruct chunk
-  "A chunk of text with its text, and offsets in url content."
+  "A chunk of text, file-path, and start and end offsets."
   text
   file-path
   start-offset

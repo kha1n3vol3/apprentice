@@ -7,6 +7,7 @@
   :depends-on (#:uiop #:cl-json #:bordeaux-threads)
   :components ((:file "package")
 	       (:file "state")
+	       (:file "prompts")
 	       (:file "helpers")
 	       (:file "file")
 	       (:file "chunk")

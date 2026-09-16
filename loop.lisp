@@ -32,10 +32,7 @@
   "Held while one call's trace is printed, so parallel calls do not
    interleave mid-line.")
 
-(defparameter *max-parallel-calls* 1
-  "Tool calls from one turn allowed to run at once. One by default:
-   concurrent edit or bash calls touching the same file corrupt it, so
-   only a loop that knows its tools are safe should raise this.")
+(defparameter *max-parallel-calls* 1)
 
 (defun call-triple (call tools out)
   "One call run and traced, as its (ID NAME OUTPUT) triple."
@@ -50,9 +47,7 @@
 
 (defun run-calls (calls tools)
   "List of (ID NAME OUTPUT) per call, in the order CALLS were given even
-   when they run at once. One turn's results travel together: some
-   providers require them batched into a single message, and some need
-   the function name alongside the id."
+   when they run at once."
   (if (or (<= *max-parallel-calls* 1) (null (rest calls)))
       (mapcar (lambda (c) (call-triple c tools *standard-output*)) calls)
       (let* ((vec     (coerce calls 'vector))
@@ -101,11 +96,6 @@
       (list (make-turn :role :system :text system)
 	    (make-turn :role :user   :text prompt))))
 
-(defun current-tools (tools)
-  "TOOLS, or what calling it returns when a loop was handed a function,
-   so a tool set can change as a run goes on."
-  (if (functionp tools) (funcall tools) tools))
-
 (defun force-final-answer (model msgs max-turns &rest options)
   "One last call with the tools taken away, so the model has to answer in
    prose rather than reach for another one. Returns the (CONTENT MSGS)
@@ -123,9 +113,6 @@
 ;;;; Standard Agent Loop
 
 
-(defparameter *standard-prompt*
-  "You are a coding agent. Use tools to inspect files before answering. Always use absolute paths.")
-
 (defun standard-loop (prompt &rest options
 		      &key (model *model*)
 			(system-prompt *standard-prompt*)
@@ -136,15 +123,14 @@
   (let ((opts (model-options options))
 	(msgs (seed-messages system-prompt prompt history)))
     (loop repeat max-turns do
-      (let* ((kit  (current-tools tools))
-	     (turn (apply #'run-model model msgs kit opts)))
+      (let ((turn (apply #'run-model model msgs tools opts)))
 	(when (eq (turn-stop turn) :error)
 	  (return (list (turn-text turn) msgs)))
 	(setf msgs (append msgs (list turn)))
 	(if (turn-calls turn)
 	    (setf msgs (append msgs (list (make-turn
 					   :role :tool-results
-					   :results (run-calls (turn-calls turn) kit)))))
+					   :results (run-calls (turn-calls turn) tools)))))
 	    (return (list (turn-text turn) msgs))))
 	  finally (return (apply #'force-final-answer
 				 model msgs max-turns opts)))))
@@ -155,8 +141,6 @@
 ;;;; NOTE: Implementation based on https://github.com/itayinbarr/little-coder
 
 
-(defparameter *little-coder-prompt*
-  *standard-prompt*)
 
 (defun little-coder-loop (prompt &rest options
 			  &key (model *model*)
@@ -194,6 +178,7 @@
 	  finally (return (apply #'force-final-answer
 				 model msgs max-turns :thinking nil opts)))))
 
+
 ;;;; Apprentice Agent Loop
 ;;;;
 ;;;; The primary model cannot read or write files. It locates things with
@@ -201,44 +186,40 @@
 ;;;; subagents, relying on their reports.
 
 
-(defparameter *apprentice-prompt*
-  "You are the lead agent on a coding task. You cannot read or modify files yourself: you have no read, write, edit or shell tools. You have file-tree to see the structure of the directory, grep to find where text and identifiers appear, dense-vector-search to find passages by meaning when you do not know the exact wording, web-search for information outside the codebase, and subagent-brief to delegate work to a subagent that can read, write and edit files and run shell commands.
-
-Start with file-tree to get oriented, then locate things with grep and dense-vector-search, since they are fast and hand you the text itself. A subagent's reply is cut off after roughly a thousand characters, so it is the wrong way to read a file: never ask one to send you a file's contents or a long passage, because the end will simply be missing. Use grep for that, with a pattern narrow enough to show the lines you need. Delegate when something must be traced, judged or changed rather than merely quoted, and delegate every change to a file.
-
-A subagent starts with no memory of this conversation, and nothing carries over between subagent calls. Make every task self-contained: absolute file paths, exactly what to find or change, and any context it needs. Never refer back to a file or function from an earlier call; name it again in full.
-
-Tell every subagent to answer briefly, findings and evidence only with no narration, since anything past the limit is lost. When you delegate a change, ask for the file path, the line numbers, and only the lines that changed, quoted. When you delegate an investigation, ask for the specific answer with file paths and line numbers, quoting only the lines that carry it. If a reply comes back marked as truncated, do not ask for it again in full; ask a narrower question instead.
-
-Give each subagent one focused task, and split larger work into several. Send independent tasks together in one call so they run at the same time, but never give two of them the same file to edit.
-
-Pass turns with every call and size it to the task: three or four for a lookup or a question about one file, eight to twelve for a change that spans several. A subagent that runs out of turns still reports what it has, so a tight budget costs you a partial answer rather than nothing, and it brings the work back to you sooner. Prefer several small tasks over one long one.
-
-When the work is done, answer the user with a summary of what changed, citing the evidence the subagents reported.")
-
-(defparameter *escalate-after* 10
-  "Subagent tasks after which the primary is handed the standard tool
-   kit. A run that is not converging through delegation can then work
-   directly instead of grinding on.")
+(defparameter *escalate-after* 10)
 
 (defun apprentice-loop (prompt &rest options
-			&key (system-prompt *apprentice-prompt*)
+			&key (model *model*)
+			  (system-prompt *apprentice-prompt*)
 			  (tools *apprentice-tools*)
+			  (max-turns 50)
+			  (history nil)
 			  (max-parallel-calls 3)
 			  (escalate-after *escalate-after*)
 			&allow-other-keys)
+  "The standard loop with one addition: once ESCALATE-AFTER subagent
+   tasks have run, the primary is handed the standard tool kit, so a run
+   that is not converging through delegation can work directly instead."
   (let ((*max-parallel-calls* max-parallel-calls)
-	(announced nil))
+	(opts      (model-options options))
+	(msgs      (seed-messages system-prompt prompt history))
+	(escalated nil))
     (setf *subagent-calls* 0)
-    (apply #'standard-loop prompt
-	   :system-prompt system-prompt
-	   :tools (lambda ()
-		    (if (< *subagent-calls* escalate-after)
-			tools
-			(progn
-			  (unless announced
-			    (setf announced t)
-			    (format t "~&⇧ ~a subagent tasks run: the standard tool kit is now available~%"
-				    *subagent-calls*))
-			  *standard-tools*)))
-	   options)))
+    (loop repeat max-turns do
+      (let* ((escalate (>= *subagent-calls* escalate-after))
+	     (kit      (if escalate *standard-tools* tools)))
+	(when (and escalate (not escalated))
+	  (setf escalated t)
+	  (format t "~&⇧ ~a subagent tasks run: the standard tool kit is now available~%"
+		  *subagent-calls*))
+	(let ((turn (apply #'run-model model msgs kit opts)))
+	  (when (eq (turn-stop turn) :error)
+	    (return (list (turn-text turn) msgs)))
+	  (setf msgs (append msgs (list turn)))
+	  (if (turn-calls turn)
+	      (setf msgs (append msgs (list (make-turn
+					     :role :tool-results
+					     :results (run-calls (turn-calls turn) kit)))))
+	      (return (list (turn-text turn) msgs)))))
+	  finally (return (apply #'force-final-answer
+				 model msgs max-turns opts)))))

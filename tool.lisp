@@ -436,8 +436,6 @@
 (defun note-subagent-call ()
   (bt:with-lock-held (*subagent-count-lock*) (incf *subagent-calls*)))
 
-(defparameter *subagent-prompt*
-  "You are a subagent. Another agent, which cannot read or change files itself, has delegated one task to you. Do it with your tools, always using absolute paths. When you are finished, reply with a concise, self-contained report: what you found or changed, with file paths and line numbers, quoting the relevant code when the task asks about it. The other agent sees only this final reply, never your tool calls or their output.")
 
 (defparameter *subagent-report-limit* 6000
   "Characters of a subagent's report the SUBAGENT tool passes back.")
