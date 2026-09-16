@@ -8,10 +8,9 @@
    #:clear
    #:drop-turns
    #:show-turns
-   #:resolve-loop
    ;; Models
-   #:models
-   #:curr-model
+   #:available-models
+   #:model
    #:set-model
    ;; Anchors
    #:anchors
@@ -20,11 +19,14 @@
    #:clear-anchors
    #:set-anchor-dir
    ;; Permissions
+   #:allowed-dirs
    #:add-allowed-dir
    #:clear-allowed-dirs
    ;; Loops
-   #:curr-loop
+   #:available-loops
+   #:current-loop
    #:set-loop
+   #:resolve-loop
    ;; Options
    #:options
    #:add-option

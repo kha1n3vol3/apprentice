@@ -6,10 +6,6 @@
 ;;;; Harness State
 
 
-;;;; What you pick in the REPL is a DEFVAR, so reloading leaves it alone.
-;;;; What is derived from another file is a DEFPARAMETER, so reloading
-;;;; rebuilds it rather than serving structs from before the edit.
-
 (defparameter *models-list*
   (list *llama-cpp-model*
 	*claude-sonnet-5-model*
@@ -24,6 +20,10 @@
 (defparameter *anchors-list*
   (list *dense-vector-search-anchor* *file-tree-anchor*))
 
+(defparameter *loops-list*
+  '((:standard     . standard-loop)
+    (:little-coder . little-coder-loop)
+    (:apprentice   . apprentice-loop)))
 (defvar *loop* :standard)
 
 (defvar *options* nil)
@@ -32,12 +32,12 @@
 ;;;; Model Functions
 
 
-(defun models ()
+(defun available-models ()
   (let ((model-names (loop for model in *models-list*
 			   collect (model-name model))))
     model-names))
 
-(defun curr-model ()
+(defun model ()
   (model-name *model*))
 
 (defun set-model (name)
@@ -53,6 +53,9 @@
 ;;;; Directory Permissions Functions
 
 
+(defun allowed-dirs ()
+  *allowed-dirs*)
+
 (defun add-allowed-dir (dir)
   (let ((path (expand-dir dir)))
     (unless (member path *allowed-dirs* :test #'equal)
@@ -65,6 +68,12 @@
 
 ;;;; Anchor Functions
 
+
+(defun available-anchors ()
+  (mapcar #'anchor-name *anchors-list*))
+
+(defun anchors ()
+  (mapcar #'anchor-name *anchors*))
 
 (defun set-anchor-dir (dir)
   (let ((new (expand-dir dir)))
@@ -85,32 +94,24 @@
 	    (push anchor *anchors*)))
 	(format t "No anchor named ~a" name))))
 
-(defun anchors ()
-  (mapcar #'anchor-name *anchors*))
-
-(defun available-anchors ()
-  (mapcar #'anchor-name *anchors-list*))
-
 (defun clear-anchors ()
   (setf *anchors* nil))
 
 
 ;;;; Loop Functions
 
+(defun available-loops ()
+  (mapcar #'car *loops-list*))
 
-(defun curr-loop ()
+(defun current-loop ()
   *loop*)
 
 (defun set-loop (loop-value)
   (setf *loop* loop-value))
 
 (defun resolve-loop (loop-symbol)
-  "Returns the appropriate loop function symbol or nil if unknown."
-  (case loop-symbol
-    (:little-coder 'little-coder-loop)
-    (:apprentice 'apprentice-loop)
-    ((:standard :default nil t) 'standard-loop)
-    (otherwise nil)))
+  (cdr (assoc (if (member loop-symbol '(:default nil t)) :standard loop-symbol)
+	      *loops-list*)))
 
 
 ;;;; Option Functions
@@ -137,16 +138,12 @@
 
 
 (defun chat (prompt &optional (loop-symbol *loop*) &rest options)
-  "CHAT runs a conversation using the specified loop.
-   
-  LOOP-SYMBOL can be one of:
-    :little-coder - use little-coder-loop
-    :standard - use standard-loop
-    :default - use standard-loop (default)
-    nil or t - use standard-loop (default)"
+  "CHAT runs a conversation using the specified loop."
   (let ((loop-fn (resolve-loop loop-symbol)))
     (if loop-fn
 	(progn
+	  (when (not *allowed-dirs*)
+	    (format t "Warning: No allowed dirs set. Use `add-allowed-dir` for proper tool use~%"))
 	  (handler-case
 	      (when *anchor-dir*
 		(process-dir *anchors* *anchor-dir*))
@@ -183,15 +180,22 @@
 (defvar *preview-limit* 100
   "Characters of a turn's content SHOW-TURNS prints before cutting it.")
 
+(defun set-preview-limit (val)
+  (setf *preview-limit* val))
+
 (defun show-turns (&rest specs)
   "Print the turns of *CHAT-HISTORY* named by SPECS, or every turn when
    given none. A spec is an index or an inclusive range, (LO . HI) or
-   (LO HI), and a negative index counts from the end. Content is cut to
-   *PREVIEW-LIMIT* characters. Read-only: nothing is modified."
-  (let* ((n   (length *chat-history*))
-	 (idx (if specs
-		  (expand-index-specs specs n)
-		  (loop for i below n collect i))))
+   (LO HI), and a negative index counts from the end."
+  (let* ((at    (position :limit specs))
+	 (limit (or (and at (nth (1+ at) specs)) *preview-limit*))
+	 (specs (if at
+		    (append (subseq specs 0 at) (nthcdr (+ at 2) specs))
+		    specs))
+	 (n     (length *chat-history*))
+	 (idx   (if specs
+		    (expand-index-specs specs n)
+		    (loop for i below n collect i))))
     (dolist (i idx)
       (let ((turn (nth i *chat-history*)))
 	(format t "~&~3d  ~14a ~a~a~%"
@@ -201,6 +205,6 @@
 		    (format nil "[~{~a~^ ~}] "
 			    (mapcar #'tool-call-name (turn-calls turn)))
 		    "")
-		(ellipsize (one-line (turn-body turn)) *preview-limit*))))
+		(ellipsize (one-line (turn-body turn)) limit))))
     (format t "~&~a of ~a turn~:p shown.~%" (length idx) n))
   (values))

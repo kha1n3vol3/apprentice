@@ -117,7 +117,6 @@
 			  unless (member path present :test #'equal)
 			    collect path))
 	(remhash gone hashes))
-      ;; Embed every changed file's chunks in one request.
       (when changed
 	(let* ((chunks (loop for f in changed append (split-file-into-chunks f)))
 	       (vectors (mapcar #'create-embedding (mapcar #'chunk-text chunks))))
