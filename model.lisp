@@ -32,7 +32,7 @@
   (apply (model-call-fn model) msgs tools options))
 
 
-;;;; Request Parameters
+;;;; Parameters
 
 
 (defstruct param
@@ -74,16 +74,23 @@
 	  do (error "Unknown option ~s. This model accepts: ~{~s~^, ~}"
 		    key (mapcar #'param-name params))))
 
+
+;;;; Messages
+
+
 (defun format-messages (msgs formatter)
   "Accumulates (values MESSAGES TOP-LEVEL-FIELDS). A formatter returns a
    list of messages and, optionally, fields for the top level of the
-   request body -- which is how a provider lifts the system prompt out
-   of the message array."
+   request body."
   (let ((out nil) (top-level-fields nil))
     (dolist (msg msgs (values out top-level-fields))
       (multiple-value-bind (ms fs) (funcall formatter msg)
 	(setf out    (append out ms))
 	(setf top-level-fields (append top-level-fields fs))))))
+
+
+;;;; Request
+
 
 (defun build-request-json (params options msgs top-level-fields tools messages-key)
   (lisp-to-json-string
@@ -107,14 +114,24 @@
 	    :limit most-positive-fixnum))
 
 
+;;;; Response
+
+
+(defun error-message (err)
+  (if (stringp err)
+      err
+      (or (s err "message") (format nil "~s" err))))
+
 (defun decode-response (body)
   "BODY as decoded JSON. A transport failure -- a dead endpoint, a
    timeout, an HTML error page from a proxy -- is not JSON, so it is
    turned into the error shape every PARSE already understands rather
    than being left to blow up in the reader."
-  (handler-case (json:decode-json-from-string body)
-    (error ()
-      (j "error" (j "message" (or body "empty response"))))))
+  (let ((text (and (stringp body) (plusp (length body)) body)))
+    (handler-case (json:decode-json-from-string text)
+      (error ()
+	(j "error" (j "message" (or text "empty response")))))))
+
 
 ;;;; Model Macro
 
@@ -200,7 +217,7 @@
   (let ((err (s raw "error")))
     (if err
 	(make-turn :role :assistant :stop :error
-		   :text (format nil "API error: ~a" (s err "message")))
+		   :text (format nil "API error: ~a" (error-message err)))
 	(let* ((choice (first (s raw "choices")))
 	       (msg    (s choice "message"))
 	       (calls  (s msg "tool_calls")))
@@ -259,7 +276,7 @@
   (let ((err (s raw "error")))
     (if err
 	(make-turn :role :assistant :stop :error
-		   :text (format nil "API error: ~a" (s err "message")))
+		   :text (format nil "API error: ~a" (error-message err)))
 	(let* ((blocks (s raw "content"))
 	       (stop   (s raw "stop_reason"))
 	       (uses   (remove-if-not (lambda (b) (equal (s b "type") "tool_use"))
@@ -322,7 +339,7 @@
   (let ((err (s raw "error")))
     (if err
 	(make-turn :role :assistant :stop :error
-		   :text (format nil "API error: ~a" (s err "message")))
+		   :text (format nil "API error: ~a" (error-message err)))
 	(let* ((items (s raw "output"))
 	       (status (s raw "status"))
 	       (reason (s raw "incomplete_details" "reason"))
@@ -407,10 +424,13 @@
 		    (gemini-rebuild-assistant turn)))))
 
 (defun gemini-parse (raw)
-  (let ((err (s raw "error")))
+  (let* ((raw (if (and (consp raw) (consp (first raw)) (consp (car (first raw))))
+		  (first raw)
+		  raw))
+	 (err (s raw "error")))
     (if err
 	(make-turn :role :assistant :stop :error
-		   :text (format nil "API error: ~a" (s err "message")))
+		   :text (format nil "API error: ~a" (error-message err)))
 	(let* ((steps  (s raw "steps"))
 	       (status (s raw "status"))
 	       (calls  (remove-if-not

@@ -257,9 +257,16 @@
    \"tool_calls\" to :TOOL--CALLS."
   (let ((curr obj))
     (dolist (k keys curr)
-      (when (null curr) (return nil))
-      (setf curr (cdr (assoc (substitute-subseq k "_" "--") curr
-			     :key #'symbol-name :test #'string-equal))))))
+      (unless (consp curr) (return nil))
+      (let ((want (substitute-subseq k "_" "--")))
+	(setf curr
+	      (loop for tail = curr then (cdr tail)
+		    while (consp tail)
+		    for pair = (car tail)
+		    when (and (consp pair)
+			      (symbolp (car pair))
+			      (string-equal want (symbol-name (car pair))))
+		      return (cdr pair)))))))
 
 
 ;;;; Command Running
