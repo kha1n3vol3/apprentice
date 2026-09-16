@@ -165,6 +165,13 @@
 ;;;; Shared by llama.cpp, vLLM, LM Studio, OpenRouter and OpenAI.
 
 
+(defun tool->openai (tool)
+  "One TOOL struct as an OpenAI-format function definition."
+  (j "type" "function"
+     "function" (j "name" (tool-name tool)
+                   "description" (tool-description tool)
+                   "parameters" (tool-schema tool))))
+
 (defun openai-format-message (turn)
   (case (turn-role turn)
     (:system (list (j "role" "system" "content" (turn-text turn))))

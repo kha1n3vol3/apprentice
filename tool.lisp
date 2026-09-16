@@ -25,17 +25,6 @@
            json-response))
 
 
-;;;; Tool JSON Handling
-
-
-(defun tool->openai (tool)
-  "One TOOL struct as an OpenAI-format function definition."
-  (j "type" "function"
-     "function" (j "name" (tool-name tool)
-                   "description" (tool-description tool)
-                   "parameters" (tool-schema tool))))
-
-
 ;;;; Permission Directories
 
 
@@ -322,66 +311,6 @@
 ;;;; Anchor Tools
 
 
-(defun offset->line (path offset)
-  "The 1-based line OFFSET falls on in PATH, or NIL if unreadable."
-  (let ((text (read-file-string-safe path)))
-    (when text
-      (1+ (count #\Newline text :end (min offset (length text)))))))
-
-(defun format-chunk-result (result)
-  "One (SCORE . CHUNK) search hit as path:line with its score, then the text."
-  (destructuring-bind (score . chunk) result
-    (let* ((path (chunk-file-path chunk))
-	   (line (offset->line path (chunk-start-offset chunk))))
-      (format nil "~a:~a (similarity ~,2f)~%~a"
-	      path
-	      (or line (format nil "char ~a" (chunk-start-offset chunk)))
-	      score
-	      (chunk-text chunk)))))
-
-(defun path-relative-parts (path root)
-  "PATH split into its component strings, relative to ROOT when PATH
-   falls under it, otherwise as an absolute list of parts."
-  (let* ((rel (or (ignore-errors (uiop:enough-pathname path root)) path))
-	 (namestring (uiop:native-namestring rel)))
-    (remove "" (uiop:split-string namestring :separator "/\\")
-	    :test #'string=)))
-
-(defun add-path-to-tree (tree parts)
-  "TREE is an alist of (name . subtree), subtree NIL for files. Inserts
-   PARTS (a list of path components) into it, returning the new alist."
-  (if (null parts)
-      tree
-      (let* ((name (first parts))
-	     (rest (rest parts))
-	     (entry (assoc name tree :test #'string=)))
-	(if entry
-	    (progn
-	      (setf (cdr entry) (add-path-to-tree (cdr entry) rest))
-	      tree)
-	    (append tree (list (cons name (add-path-to-tree nil rest))))))))
-
-(defun paths-to-tree (paths root)
-  "An alist tree (see ADD-PATH-TO-TREE) built from PATHS, made relative
-   to ROOT when possible."
-  (let ((tree nil))
-    (dolist (path paths tree)
-      (setf tree (add-path-to-tree tree (path-relative-parts path root))))))
-
-(defun format-tree (tree &optional (prefix ""))
-  "TREE (see PATHS-TO-TREE) as a directory-listing string, using the
-   usual box-drawing branches."
-  (with-output-to-string (out)
-    (loop for (entry . rest) on tree
-	  for name = (car entry)
-	  for subtree = (cdr entry)
-	  for last = (null rest)
-	  do (format out "~a~a~a~%" prefix (if last "└── " "├── ") name)
-	     (when subtree
-	       (write-string
-		(format-tree subtree (concatenate 'string prefix (if last "    " "│   ")))
-		out)))))
-
 (deftool file-tree
   "Show the directory structure of an indexed directory as a tree, without touching disk again. Tool only works if the file-tree anchor is enabled for this directory."
   ()
@@ -415,121 +344,9 @@
 
 
 ;;;; Sub-Agent Tools
+;;;;
+;;;; The helpers these call live in subagent.lisp.
 
-
-(defparameter *subagent-loop* :little-coder
-  "Which loop the subagent runs.")
-
-(defparameter *subagent-max-turns* 8
-  "Turns a subagent gets when a call does not name its own budget. Small
-   on purpose: the primary sees a result sooner and can redirect, and a
-   short context is where a small model is at its best.")
-
-(defparameter *subagent-calls* 0
-  "Subagent tasks run since the current loop started. A plain global that
-   is SETF back to zero, never rebound: parallel subagents run in threads,
-   and a thread does not inherit dynamic bindings, so a LET here would
-   leave the count stuck at zero.")
-
-(defvar *subagent-count-lock* (bt:make-lock "apprentice-subagent-count"))
-
-(defun note-subagent-call ()
-  (bt:with-lock-held (*subagent-count-lock*) (incf *subagent-calls*)))
-
-
-(defparameter *subagent-report-limit* 6000
-  "Characters of a subagent's report the SUBAGENT tool passes back.")
-
-(defparameter *subagent-brief-limit* 1200
-  "The same, for SUBAGENT-BRIEF. Small on purpose: a loop that delegates
-   constantly keeps every report it gets back in context for the rest of
-   the run.")
-
-(defparameter *subagent-tool-names* '("subagent" "subagent-brief")
-  "Withheld from a subagent, so one cannot delegate further.")
-
-(defparameter *max-parallel-subagents* 3
-  "Subagents allowed to run at the same time.")
-
-(defun run-subagent-1 (task limit turns)
-  "TASK run on the subagent model, its report cut to LIMIT characters.
-   TURNS overrides *SUBAGENT-MAX-TURNS* when given."
-  (let ((tools (remove-if (lambda (tl)
-			    (member (tool-name tl) *subagent-tool-names*
-				    :test #'string=))
-			  *subagent-tools*)))
-    (note-subagent-call)
-    (bt:with-lock-held (*trace-lock*)
-      (format t "~&⇢ subagent (~a, ~(~a~) loop, ~a turns): ~a~%"
-	      (model-name *subagent-model*) *subagent-loop*
-	      (or turns *subagent-max-turns*) task)
-      (finish-output))
-    (destructuring-bind (content msgs)
-	(funcall (resolve-loop *subagent-loop*) task
-		 :model *subagent-model*
-		 :system-prompt *subagent-prompt*
-		 :system *subagent-prompt*
-		 :tools tools
-		 :max-turns (or turns *subagent-max-turns*))
-      (declare (ignore msgs))
-      ;; "" is true in Lisp, so OR alone lets an empty report through as
-      ;; a blank line the caller cannot interpret.
-      (truncate-output (if (and (stringp content) (string/= content ""))
-			   content
-			   "(the subagent returned no report)")
-		       limit))))
-
-(defun run-subagents (tasks limit turns)
-  "TASKS run on the subagent model, *MAX-PARALLEL-SUBAGENTS* at a time.
-   Reports come back in the order the tasks were given, never the order
-   they finished. A thread does not inherit the caller's dynamic
-   bindings, so every special a subagent reads is captured here and
-   rebound inside the thread."
-  (let* ((tasks (if (stringp tasks)
-		    (list tasks)
-		    (remove-if-not #'stringp tasks)))
-	 (n (length tasks)))
-    (cond
-      ((zerop n) "No tasks were given. Send tasks as a list of strings.")
-      ((= n 1) (run-subagent-1 (first tasks) limit turns))
-      (t
-       (let ((vec     (coerce tasks 'vector))
-	     (results (make-array n :initial-element nil))
-	     (out     *standard-output*)
-	     (dirs    *allowed-dirs*)
-	     (anchor  *anchor-dir*)
-	     (model   *subagent-model*)
-	     (kit     *subagent-tools*)
-	     (lp      *subagent-loop*)
-	     (prompt  *subagent-prompt*)
-	     (turns*  *subagent-max-turns*))
-	 (loop for start from 0 below n by *max-parallel-subagents*
-	       do (mapc
-		   #'bt:join-thread
-		   (loop for i from start
-			   below (min n (+ start *max-parallel-subagents*))
-			 collect
-			 (let ((i i))
-			   (bt:make-thread
-			    (lambda ()
-			      (let ((*standard-output*    out)
-				    (*allowed-dirs*       dirs)
-				    (*anchor-dir*         anchor)
-				    (*subagent-model*     model)
-				    (*subagent-tools*     kit)
-				    (*subagent-loop*      lp)
-				    (*subagent-prompt*    prompt)
-				    (*subagent-max-turns* turns*))
-				(setf (aref results i)
-				      (handler-case
-					  (run-subagent-1 (aref vec i) limit turns)
-					(error (e)
-					  (format nil "Subagent failed: ~a" e))))))
-			    :name "apprentice-subagent")))))
-	 (format nil "~{~a~^~%~%~}"
-		 (loop for i below n
-		       collect (format nil "--- task ~a of ~a ---~%~a"
-				       (1+ i) n (aref results i)))))))))
 
 (deftool subagent
   "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together, so send independent pieces of work in one call rather than one at a time. Each subagent starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Never give two tasks in the same call the same file to edit, since they would overwrite each other."

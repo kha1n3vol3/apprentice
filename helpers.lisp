@@ -95,6 +95,74 @@
      (or (ignore-errors (uiop:resolve-symlinks path)) path))))
 
 
+;;;; Path Trees
+
+
+(defun path-relative-parts (path root)
+  "PATH split into its component strings, relative to ROOT when PATH
+   falls under it, otherwise as an absolute list of parts."
+  (let* ((rel (or (ignore-errors (uiop:enough-pathname path root)) path))
+	 (namestring (uiop:native-namestring rel)))
+    (remove "" (uiop:split-string namestring :separator "/\\")
+	    :test #'string=)))
+
+(defun add-path-to-tree (tree parts)
+  "TREE is an alist of (name . subtree), subtree NIL for files. Inserts
+   PARTS (a list of path components) into it, returning the new alist."
+  (if (null parts)
+      tree
+      (let* ((name (first parts))
+	     (rest (rest parts))
+	     (entry (assoc name tree :test #'string=)))
+	(if entry
+	    (progn
+	      (setf (cdr entry) (add-path-to-tree (cdr entry) rest))
+	      tree)
+	    (append tree (list (cons name (add-path-to-tree nil rest))))))))
+
+(defun paths-to-tree (paths root)
+  "An alist tree (see ADD-PATH-TO-TREE) built from PATHS, made relative
+   to ROOT when possible."
+  (let ((tree nil))
+    (dolist (path paths tree)
+      (setf tree (add-path-to-tree tree (path-relative-parts path root))))))
+
+(defun format-tree (tree &optional (prefix ""))
+  "TREE (see PATHS-TO-TREE) as a directory-listing string, using the
+   usual box-drawing branches."
+  (with-output-to-string (out)
+    (loop for (entry . rest) on tree
+	  for name = (car entry)
+	  for subtree = (cdr entry)
+	  for last = (null rest)
+	  do (format out "~a~a~a~%" prefix (if last "└── " "├── ") name)
+	     (when subtree
+	       (write-string
+		(format-tree subtree (concatenate 'string prefix (if last "    " "│   ")))
+		out)))))
+
+
+;;;; Chunks
+
+
+(defun offset->line (path offset)
+  "The 1-based line OFFSET falls on in PATH, or NIL if unreadable."
+  (let ((text (read-file-string-safe path)))
+    (when text
+      (1+ (count #\Newline text :end (min offset (length text)))))))
+
+(defun format-chunk-result (result)
+  "One (SCORE . CHUNK) search hit as path:line with its score, then the text."
+  (destructuring-bind (score . chunk) result
+    (let* ((path (chunk-file-path chunk))
+	   (line (offset->line path (chunk-start-offset chunk))))
+      (format nil "~a:~a (similarity ~,2f)~%~a"
+	      path
+	      (or line (format nil "char ~a" (chunk-start-offset chunk)))
+	      score
+	      (chunk-text chunk)))))
+
+
 ;;;; Index Specs
 
 
