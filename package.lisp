@@ -7,6 +7,7 @@
    #:chat
    #:clear
    #:drop-turns
+   #:set-preview-limit
    #:show-turns
    ;; Models
    #:available-models
