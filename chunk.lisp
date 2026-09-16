@@ -16,7 +16,7 @@
 
 
 (defun split-file-into-chunks (file &key (chunk-size *default-chunk-size*)
-				         (overlap *chunk-overlap*))
+				      (overlap *chunk-overlap*))
   "Split TEXT into overlapping chunks of CHUNK-SIZE characters.
    Tries to break at sentence level when possible."
   (let* ((text (file-content file))

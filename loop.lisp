@@ -128,10 +128,10 @@
 
 (defun standard-loop (prompt &rest options
 		      &key (model *model*)
-			   (system-prompt *standard-prompt*)
-			   (tools *standard-tools*)
-			   (max-turns 50)
-			   (history nil)
+			(system-prompt *standard-prompt*)
+			(tools *standard-tools*)
+			(max-turns 50)
+			(history nil)
 		      &allow-other-keys)
   (let ((opts (model-options options))
 	(msgs (seed-messages system-prompt prompt history)))
@@ -143,8 +143,8 @@
 	(setf msgs (append msgs (list turn)))
 	(if (turn-calls turn)
 	    (setf msgs (append msgs (list (make-turn
-					    :role :tool-results
-					    :results (run-calls (turn-calls turn) kit)))))
+					   :role :tool-results
+					   :results (run-calls (turn-calls turn) kit)))))
 	    (return (list (turn-text turn) msgs))))
 	  finally (return (apply #'force-final-answer
 				 model msgs max-turns opts)))))
@@ -160,10 +160,10 @@
 
 (defun little-coder-loop (prompt &rest options
 			  &key (model *model*)
-			       (system *little-coder-prompt*)
-			       (tools *little-coder-tools*)
-			       (max-turns 20)
-			       (history nil)
+			    (system *little-coder-prompt*)
+			    (tools *little-coder-tools*)
+			    (max-turns 20)
+			    (history nil)
 			  &allow-other-keys)
   (let ((opts (model-options options :thinking))
 	(msgs (seed-messages system prompt history)))
@@ -183,13 +183,13 @@
 	     (setf msgs (append msgs (list retry)))
 	     (if (turn-calls retry)
 		 (setf msgs (append msgs (list (make-turn
-						 :role :tool-results
-						 :results (run-calls (turn-calls retry) tools)))))
+						:role :tool-results
+						:results (run-calls (turn-calls retry) tools)))))
 		 (return (list (turn-text retry) msgs)))))
 	  ((turn-calls turn)
 	   (setf msgs (append msgs (list (make-turn
-					   :role :tool-results
-					   :results (run-calls (turn-calls turn) tools))))))
+					  :role :tool-results
+					  :results (run-calls (turn-calls turn) tools))))))
 	  (t (return (list (turn-text turn) msgs)))))
 	  finally (return (apply #'force-final-answer
 				 model msgs max-turns :thinking nil opts)))))
@@ -223,9 +223,9 @@ When the work is done, answer the user with a summary of what changed, citing th
 
 (defun apprentice-loop (prompt &rest options
 			&key (system-prompt *apprentice-prompt*)
-			     (tools *apprentice-tools*)
-			     (max-parallel-calls 3)
-			     (escalate-after *escalate-after*)
+			  (tools *apprentice-tools*)
+			  (max-parallel-calls 3)
+			  (escalate-after *escalate-after*)
 			&allow-other-keys)
   (let ((*max-parallel-calls* max-parallel-calls)
 	(announced nil))

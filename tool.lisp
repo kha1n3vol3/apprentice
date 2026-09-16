@@ -87,9 +87,9 @@
 
 (defun is-allowed-bash (command)
   (some (lambda (x) (eq x 't))
-		  (mapcar
-		   (lambda (x) (starts-with-p command x))
-		   *bash-whitelist*)))
+	(mapcar
+	 (lambda (x) (starts-with-p command x))
+	 *bash-whitelist*)))
 
 ;;;; Tool Macros
 
@@ -132,13 +132,13 @@
                      ;; Empty alists encode as null, but a schema needs {} and [].
                      "properties"
                      (or (j ,@(loop for (pname ptype pdesc) in all
-                               append (list (string-downcase (symbol-name pname))
-                                            (param-schema-form ptype pdesc))))
+				    append (list (string-downcase (symbol-name pname))
+						 (param-schema-form ptype pdesc))))
                          (make-hash-table))
                      "required"
                      (vector ,@(mapcar (lambda (p) (string-downcase
-                                              (symbol-name (first p))))
-                                   required)))
+						    (symbol-name (first p))))
+                                       required)))
           :fn ,(bind fn)
           :checks (list ,@(loop for (test msg) in checks
                                 collect (bind `(unless ,test ,msg)))))))))
@@ -148,11 +148,11 @@
 
 
 (deftool grep
-    "Search for a regular expression pattern in files under a directory. Returns matching lines prefixed with file path and line number."
-    ((pattern :string "The regular expression to search for")
-     (path    :string "Directory or file to search in")
-     &optional
-     (glob    :string "Optional filename filter, e.g. *.lisp"))
+  "Search for a regular expression pattern in files under a directory. Returns matching lines prefixed with file path and line number."
+  ((pattern :string "The regular expression to search for")
+   (path    :string "Directory or file to search in")
+   &optional
+   (glob    :string "Optional filename filter, e.g. *.lisp"))
   :checks (((is-allowed-path *allowed-dirs* path)
 	    (format nil "Not allowed to access this path. Allowed dirs: ~a"
 		    (format nil "~{~A~^, ~}" *allowed-dirs*))))
@@ -162,14 +162,14 @@
                 :empty "(no matches found)"))
 
 (deftool read
-    "Read the contents of a file, with line numbers prefixed."
-    ((path :string "Absolute path to the file to read")
-     &optional
-     (offset :integer "1-based line to start from, default 1")
-     (limit  :integer "Maximum lines to read, default 2000"))
+  "Read the contents of a file, with line numbers prefixed."
+  ((path :string "Absolute path to the file to read")
+   &optional
+   (offset :integer "1-based line to start from, default 1")
+   (limit  :integer "Maximum lines to read, default 2000"))
   :checks (((is-allowed-path *allowed-dirs* path)
 	    (format nil "Not allowed to access this path. Allowed dirs: ~a"
-		     (format nil "~{~A~^, ~}" *allowed-dirs*))))
+		    (format nil "~{~A~^, ~}" *allowed-dirs*))))
   :fn (let ((start (or offset 1)) (n (or limit 2000)))
         (with-open-file (in path :external-format :utf-8)
           (loop for i from 1
@@ -180,12 +180,12 @@
                 finally (return (format nil "~{~a~^~%~}" out))))))
 
 (deftool write
-    "Write text to a file, creating it or overwriting it entirely."
-    ((path    :string "Absolute path of the file to write")
-     (content :string "Full text to write to the file"))
+  "Write text to a file, creating it or overwriting it entirely."
+  ((path    :string "Absolute path of the file to write")
+   (content :string "Full text to write to the file"))
   :checks (((is-allowed-new-path *allowed-dirs* path)
 	    (format nil "Not allowed to edit at this path. Allowed dirs: ~a"
-		     (format nil "~{~A~^, ~}" *allowed-dirs*))))
+		    (format nil "~{~A~^, ~}" *allowed-dirs*))))
   :fn (progn
         (with-open-file (out path :direction :output :if-exists :supersede
                                   :if-does-not-exist :create :external-format :utf-8)
@@ -193,8 +193,8 @@
         (format nil "Wrote ~a line~:p to ~a" (length (file-lines content)) path)))
 
 (deftool bash
-    "Run a shell command in the repository directory. Returns combined stdout and stderr."
-    ((command :string "The shell command to run"))
+  "Run a shell command in the repository directory. Returns combined stdout and stderr."
+  ((command :string "The shell command to run"))
   :checks (((first *allowed-dirs*) "No allowed directory is configured"))
   :fn (multiple-value-bind (out err code)
           (uiop:run-program (list "/bin/sh" "-c" command)
@@ -221,11 +221,11 @@
 	  (s r "title") (s r "url") (s r "highlights")))
 
 (deftool web-search
-    "Search the web using the Exa search API. Returns results with title, URL, and highlights."
-    ((query :string "The search query")
-     &optional
-     (limit :integer "Maximum number of results to return, default 5")
-     (mode  :string "Search type: auto, fast, instant, deep-lite, deep, or deep-reasoning. Default auto."))
+  "Search the web using the Exa search API. Returns results with title, URL, and highlights."
+  ((query :string "The search query")
+   &optional
+   (limit :integer "Maximum number of results to return, default 5")
+   (mode  :string "Search type: auto, fast, instant, deep-lite, deep, or deep-reasoning. Default auto."))
   :checks (((uiop:getenv "EXA_API_KEY") "EXA_API_KEY environment variable is not set"))
   :fn (let* ((body (lisp-to-verbatim-json-string
 		    (j "query" query
@@ -256,7 +256,7 @@
    (content :string "Full text to write to the file"))
   :checks (((is-allowed-new-path *allowed-dirs* path)
 	    (format nil "Not allowed to edit at this path. Allowed dirs: ~a"
-		     (format nil "~{~A~^, ~}" *allowed-dirs*)))
+		    (format nil "~{~A~^, ~}" *allowed-dirs*)))
 	   ((not (uiop:file-exists-p path)) "Not allowed to write to existing file. Use an edit tool instead."))
   :fn (progn
 	(with-open-file (out path :direction :output
@@ -273,34 +273,34 @@
    (content      :string "Content to insert when overwriting file section between START-LINE and END-LINE"))
   :checks (((is-allowed-path *allowed-dirs* path)
 	    (format nil "Not allowed to edit at this path. Allowed dirs: ~a"
-		     (format nil "~{~A~^, ~}" *allowed-dirs*)))
+		    (format nil "~{~A~^, ~}" *allowed-dirs*)))
 	   ((uiop:file-exists-p path)
 	    "File does not exist. To write a new file, use the write tool.")
 	   ((<= start-offset end-offset) "END-OFFSET cannot be less than START-OFFSET"))
   :fn (let* ((original (uiop:read-file-string path :external-format :utf-8))
-           (len (length original)))
-      (cond
-        ((> start-offset len)
-         (format nil "START-OFFSET ~a is past end of file (~a characters)"
-                 start-offset len))
-        ((> end-offset len)
-         (format nil "END-OFFSET ~a is past end of file (~a characters)"
-                 end-offset len))
-        (t
-         (let ((new (concatenate 'string
-                                 (subseq original 0 start-offset)
-                                 content
-                                 (subseq original end-offset))))
-           (with-open-file (out path :direction :output
-                                     :if-exists :supersede
-                                     :external-format :utf-8)
-             (write-string new out))
-           (format nil "Replaced ~a characters with ~a characters in ~a"
-                   (- end-offset start-offset) (length content) path))))))
+             (len (length original)))
+	(cond
+          ((> start-offset len)
+           (format nil "START-OFFSET ~a is past end of file (~a characters)"
+                   start-offset len))
+          ((> end-offset len)
+           (format nil "END-OFFSET ~a is past end of file (~a characters)"
+                   end-offset len))
+          (t
+           (let ((new (concatenate 'string
+                                   (subseq original 0 start-offset)
+                                   content
+                                   (subseq original end-offset))))
+             (with-open-file (out path :direction :output
+                                       :if-exists :supersede
+                                       :external-format :utf-8)
+               (write-string new out))
+             (format nil "Replaced ~a characters with ~a characters in ~a"
+                     (- end-offset start-offset) (length content) path))))))
 
 (deftool little-coder-bash
-    "Run a shell command in the repository directory. Returns combined stdout and stderr."
-    ((command :string "The shell command to run"))
+  "Run a shell command in the repository directory. Returns combined stdout and stderr."
+  ((command :string "The shell command to run"))
   :checks (((first *allowed-dirs*) "No allowed directory is configured")
 	   ((is-allowed-bash command)
 	    (format nil "Not an allowed command. These are allowed commands: ~a"
@@ -384,7 +384,7 @@
 
 (deftool file-tree
   "Show the directory structure of an indexed directory as a tree, without touching disk again. Tool only works if the file-tree anchor is enabled for this directory."
-    ()
+  ()
   :checks (((gethash 'paths (anchor-bindings *file-tree-anchor*))
 	    "The file tree index is empty or not enabled for this directory."))
   :fn (let* ((paths (gethash 'paths (anchor-bindings *file-tree-anchor*)))
@@ -396,9 +396,9 @@
   "Search indexed files by meaning rather than exact text. Returns the most relevant chunks
    as path with a similarity score. Use it when you do not know the exact name or wording to
    grep for. Tool only works if an anchor directory is defined."
-    ((query :string "What to look for, described in plain language")
-     &optional
-     (limit :integer "Maximum number of passages to return, default 5"))
+  ((query :string "What to look for, described in plain language")
+   &optional
+   (limit :integer "Maximum number of passages to return, default 5"))
   :checks (((gethash 'entries (anchor-bindings *dense-vector-search-anchor*))
 	    "The dense vector index is empty or not enabled for this directory."))
   :fn (let* ((entries (gethash 'entries (anchor-bindings *dense-vector-search-anchor*)))
@@ -534,20 +534,20 @@
 				       (1+ i) n (aref results i)))))))))
 
 (deftool subagent
-    "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together, so send independent pieces of work in one call rather than one at a time. Each subagent starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Never give two tasks in the same call the same file to edit, since they would overwrite each other."
-    ((tasks (:array :string) "One complete, self-contained instruction per subagent")
-     &optional
-     (turns :integer "How many turns each subagent may take before it must answer with whatever it has"))
+  "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together, so send independent pieces of work in one call rather than one at a time. Each subagent starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Never give two tasks in the same call the same file to edit, since they would overwrite each other."
+  ((tasks (:array :string) "One complete, self-contained instruction per subagent")
+   &optional
+   (turns :integer "How many turns each subagent may take before it must answer with whatever it has"))
   :checks ((*subagent-model* "No subagent model is configured.")
 	   ((resolve-loop *subagent-loop*)
 	    (format nil "Unknown subagent loop ~s." *subagent-loop*)))
   :fn (run-subagents tasks *subagent-report-limit* turns))
 
 (deftool subagent-brief
-    "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together, so send independent pieces of work in one call rather than one at a time. Each subagent starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Never give two tasks in the same call the same file to edit, since they would overwrite each other. Each reply is cut short after a small number of characters, so ask for brief reports -- findings and evidence only, no narration -- or the ends of the answers are lost."
-    ((tasks (:array :string) "One complete, self-contained instruction per subagent")
-     &optional
-     (turns :integer "How many turns each subagent may take before it must answer with whatever it has"))
+  "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together, so send independent pieces of work in one call rather than one at a time. Each subagent starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Never give two tasks in the same call the same file to edit, since they would overwrite each other. Each reply is cut short after a small number of characters, so ask for brief reports -- findings and evidence only, no narration -- or the ends of the answers are lost."
+  ((tasks (:array :string) "One complete, self-contained instruction per subagent")
+   &optional
+   (turns :integer "How many turns each subagent may take before it must answer with whatever it has"))
   :checks ((*subagent-model* "No subagent model is configured.")
 	   ((resolve-loop *subagent-loop*)
 	    (format nil "Unknown subagent loop ~s." *subagent-loop*)))

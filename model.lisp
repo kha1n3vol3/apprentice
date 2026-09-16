@@ -43,21 +43,21 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun param-row-form (row)
-  "Expansion-time: one DEFMODEL :PARAMS row to a form building a PARAM."
-  (let* ((name (first row))
-	 (rest (rest row))
-	 (key (if (stringp (first rest))
-		   (pop rest)
-		   (substitute #\_ #\- (string-downcase (symbol-name name)))))
-	 (default (getf rest :default :none))
-	 (as (getf rest :as)))
-    `(make-param :name ,(intern (symbol-name name) :keyword)
-		 :key ,key
-		 :default ',default
-		 :transform ,(when as
-			       `(lambda (value)
-				  (declare (ignorable value))
-				  ,as))))))
+    "Expansion-time: one DEFMODEL :PARAMS row to a form building a PARAM."
+    (let* ((name (first row))
+	   (rest (rest row))
+	   (key (if (stringp (first rest))
+		    (pop rest)
+		    (substitute #\_ #\- (string-downcase (symbol-name name)))))
+	   (default (getf rest :default :none))
+	   (as (getf rest :as)))
+      `(make-param :name ,(intern (symbol-name name) :keyword)
+		   :key ,key
+		   :default ',default
+		   :transform ,(when as
+				 `(lambda (value)
+				    (declare (ignorable value))
+				    ,as))))))
 
 (defun param-pair (param options)
   "The JSON key and value PARAM contributes, or NIL to omit it."
@@ -204,11 +204,11 @@
 	   :calls
 	   (mapcar (lambda (c)
 		     (make-tool-call :id   (s c "id")
-				:name (s c "function" "name")
-				:args (handler-case
-					  (json:decode-json-from-string
-					   (s c "function" "arguments"))
-					(error () :malformed))))
+				     :name (s c "function" "name")
+				     :args (handler-case
+					       (json:decode-json-from-string
+						(s c "function" "arguments"))
+					     (error () :malformed))))
 		   calls)
 	   :stop
 	   (cond ((null choice)                               :error)

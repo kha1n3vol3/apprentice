@@ -47,12 +47,12 @@
 (defun process-anchor (anchor files)
   (let ((process-fn (anchor-process-fn anchor)))
     (funcall process-fn files)))
-    
+
 
 (defun process-dir (anchors dir)
   (let ((files (create-files-from-dir dir)))
     (loop for anchor in anchors do
-	  (process-anchor anchor files))))
+      (process-anchor anchor files))))
 
 
 ;;;; Anchor Helpers
@@ -97,8 +97,8 @@
   "A Dense-Vector embedding anchor which chunks each file's text and computes
    an embedding. Files are hashed by content, so only what changed is
    re-embedded. Serialized and deserialized through saved files."
-  :bindings ((entries nil)                            ; (CHUNK . EMBEDDING) pairs
-	     (hashes (make-hash-table :test 'equal))) ; path -> content SXHASH
+  :bindings ((entries nil)
+	     (hashes (make-hash-table :test 'equal)))
   :process
   (lambda (files)
     (let* ((present (mapcar #'file-path files))
