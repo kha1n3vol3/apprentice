@@ -81,6 +81,25 @@
 	    "description" ,pdesc))))
 
 (defmacro deftool (name description params &key checks fn)
+  ;; Usage:
+  ;;
+  ;;   (deftool name
+  ;;     "description"
+  ;;     ((param type "description")
+  ;;      &optional
+  ;;      (param type "description"))
+  ;;     :checks ((test "message"))
+  ;;     :fn form)
+  ;;
+  ;; NAME         Symbol. The tool's name
+  ;; DESCRIPTION  String description sent to the model.
+  ;; PARAMS       (NAME TYPE DESCRIPTION) per argument. TYPE is :string,
+  ;;              :integer or (:array :string). Those after &optional are
+  ;;              not required.
+  ;; :CHECKS      (TEST MESSAGE) pairs. When a TEST is false its MESSAGE goes
+  ;;              back to the model and :fn does not run.
+  ;; :FN          One form, run once every check passes. Its value is the
+  ;;              tool's result.
   (let* ((name-string (string-downcase (symbol-name name)))
          (tool-var (intern (format nil "*~:@(~a~)-TOOL*" name)))
          (opt-pos (position '&optional params))

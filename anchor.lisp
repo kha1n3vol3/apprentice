@@ -17,6 +17,22 @@
 
 
 (defmacro defanchor (name description &key bindings process serialize deserialize)
+  ;; Usage:
+  ;;
+  ;;   (defanchor name
+  ;;     "description"
+  ;;     :bindings ((var init))
+  ;;     :process (lambda (files) ...)
+  ;;     :serialize (lambda (folder) ...)
+  ;;     :deserialize (lambda (folder) ...))
+  ;;
+  ;; NAME          Symbol. The anchor's name.
+  ;; DESCRIPTION   String.
+  ;; :BINDINGS     (VAR INIT) state declarations the anchor holds and can modify.
+  ;; :PROCESS      A function of FILES, the file structs found under the anchor
+  ;;               directory. Updates the bindings. Runs before each chat request.
+  ;; :SERIALIZE    A function of FOLDER. Writes the bindings to disk.
+  ;; :DESERIALIZE  A function of FOLDER. Reads them back into the bindings.
   (let* ((var (intern (format nil "*~:@(~a~)-ANCHOR*" name)))
 	 (table (gensym "TABLE"))
 	 (sym-macros (loop for (sym) in bindings

@@ -139,6 +139,35 @@
 			   messages-key
 			   format-tool
 			   parse)
+  ;; Usage:
+  ;;
+  ;;   (defmodel name
+  ;;     :endpoint "https://..."
+  ;;     :headers (("Header-Name" value))
+  ;;     :params ((option "json_key" :default value :as form))
+  ;;     :messages-key "messages"
+  ;;     :format-message form
+  ;;     :format-tool form
+  ;;     :parse form)
+  ;;
+  ;; NAME             Symbol. The model's name.
+  ;; :ENDPOINT        URL the request is posted to.
+  ;; :HEADERS         (NAME VALUE) per header. VALUE is evaluated on every
+  ;;                  call, and a header whose VALUE is NIL is left out.
+  ;; :PARAMS          One row per option the model accepts:
+  ;;                    (OPTION [JSON-KEY] [:default VALUE] [:as FORM])
+  ;;                  OPTION is the keyword passed in. JSON-KEY defaults to
+  ;;                  OPTION with dashes turned to underscores. Without
+  ;;                  :default the key is sent only when the option is given.
+  ;;                  :as rewrites the value before sending, seeing it as VALUE.
+  ;; :MESSAGES-KEY    JSON key holding the message list. Defaults to "messages".
+  ;; :FORMAT-MESSAGE  A body with MSG bound to one turn. Returns a list of wire
+  ;;                  messages, and optionally a second value of fields for the
+  ;;                  top level of the request.
+  ;; :FORMAT-TOOL     A body with TOOL bound. Returns the tool as the provider
+  ;;                  expects it.
+  ;; :PARSE           A body with RAW bound to the decoded response. Returns a
+  ;;                  turn.
   (let ((var (intern (format nil "*~:@(~a~)-MODEL*" name))))
     `(defparameter ,var
        (make-model
