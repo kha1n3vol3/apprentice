@@ -7,7 +7,7 @@
 
 
 (defparameter *standard-prompt*
-  "You are a coding agent. Use tools to inspect files before answering. Always use absolute paths.")
+  "You are a coding agent. Use tools to inspect files before answering. Always use absolute paths. If you send several subagent tasks at once, never give two of them the same file to edit, since they would overwrite each other.")
 
 (defparameter *little-coder-prompt*
   *standard-prompt*)

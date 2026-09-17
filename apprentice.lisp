@@ -33,14 +33,17 @@
 
 
 (defun available-models ()
+  "Returns available models."
   (let ((model-names (loop for model in *models-list*
 			   collect (model-name model))))
     model-names))
 
 (defun model ()
+  "Returns current model."
   (model-name *model*))
 
 (defun set-model (name)
+  "Sets current model to the one corresponding to NAME."
   (let ((model (find-if (lambda (m) (equalp name (model-name m)))
 			*models-list*)))
     (if model
@@ -54,15 +57,18 @@
 
 
 (defun allowed-dirs ()
+  "Returns allowed directories already set."
   *allowed-dirs*)
 
 (defun add-allowed-dir (dir)
+  "Adds an allowed directory to current list."
   (let ((path (expand-dir dir)))
     (unless (member path *allowed-dirs* :test #'equal)
       (push path *allowed-dirs*))
     *allowed-dirs*))
 
 (defun clear-allowed-dirs ()
+  "Clears all allowed directories."
   (setf *allowed-dirs* nil))
 
 
@@ -70,12 +76,15 @@
 
 
 (defun available-anchors ()
+  "Returns available anchors."
   (mapcar #'anchor-name *anchors-list*))
 
 (defun anchors ()
+  "Returns currently enabled anchors."
   (mapcar #'anchor-name *anchors*))
 
 (defun set-anchor-dir (dir)
+  "Sets the current anchor directory to DIR."
   (let ((new (expand-dir dir)))
     (save-anchors)
     (setf *anchor-dir* new)
@@ -85,6 +94,7 @@
     new))
 
 (defun add-anchor (name)
+  "Adds an anchor to the current list."
   (let ((anchor (find-if (lambda (a) (equalp name (anchor-name a)))
 			 *anchors-list*)))
     (if anchor
@@ -95,21 +105,27 @@
 	(format t "No anchor named ~a" name))))
 
 (defun clear-anchors ()
+  "Clears all anchors."
   (setf *anchors* nil))
 
 
 ;;;; Loop Functions
 
+
 (defun available-loops ()
+  "Returns all available coding loops."
   (mapcar #'car *loops-list*))
 
 (defun current-loop ()
+  "Returns current coding loop."
   *loop*)
 
 (defun set-loop (loop-value)
+  "Sets current coding loop to one corresponding to LOOP-VALUE."
   (setf *loop* loop-value))
 
 (defun resolve-loop (loop-symbol)
+  "Resolves a coding loop function from LOOP-SYMBOL."
   (cdr (assoc (if (member loop-symbol '(:default nil t)) :standard loop-symbol)
 	      *loops-list*)))
 
@@ -118,16 +134,20 @@
 
 
 (defun options ()
+  "Currently enabled options passed to coding loop."
   *options*)
 
 (defun add-option (key val)
+  "Adds an option through KEY and VAL."
   (setf *options* (remove key *options* :key #'car))
   (push (cons key val) *options*))
 
 (defun clear-options ()
+  "Clears all currently set options."
   (setf *options* nil))
 
 (defun unwrap-options (options)
+  "Unwraps options to be applied to the coding loop."
   (if (and options (consp (first options)))
       (loop for (key . val) in options
 	    append (list key val))

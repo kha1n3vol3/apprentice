@@ -11,10 +11,13 @@
 ;;;; File Handling
 
 
+(defun dot-name-p (name)
+  "Determines if NAME begins with a dot."
+  (and (stringp name) (plusp (length name)) (char= (char name 0) #\.)))
+
 (defun hidden-file-p (path)
-  (let ((name (file-namestring path)))
-    (and (plusp (length name))
-         (char= (char name 0) #\.))))
+  "Determines if PATH is hidden."
+  (dot-name-p (file-namestring path)))
 
 (defun read-file-string-safe (path)
   (handler-case
@@ -22,6 +25,7 @@
     (error nil)))
 
 (defun create-file (path)
+  "Creates file struct from PATH."
   (let ((content (read-file-string-safe path)))
     (when content
       (make-file
@@ -42,9 +46,6 @@
 
 (defparameter *max-walk-depth* 16)
 
-(defun dot-name-p (name)
-  (and (stringp name) (plusp (length name)) (char= (char name 0) #\.)))
-
 (defun ignored-dir-p (dir)
   (let ((name (car (last (pathname-directory dir)))))
     (or (dot-name-p name)
@@ -57,6 +58,7 @@
 	(and type (member type *ignored-extensions* :test #'string-equal)))))
 
 (defun collect-files (dir &optional (depth 0))
+  "Collect valid files we want to consider in DIR."
   (when (< depth *max-walk-depth*)
     (let ((files (remove-if #'ignored-file-p
 			    (ignore-errors (uiop:directory-files dir)))))

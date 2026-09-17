@@ -28,8 +28,7 @@
 (defparameter *max-parallel-subagents* 3)
 
 (defun run-subagent-1 (task limit turns)
-  "TASK run on the subagent model, its report cut to LIMIT characters.
-   TURNS overrides *SUBAGENT-MAX-TURNS* when given."
+  "Runs one subagent with TASK, limited to TURNS, response truncated to LIMIT."
   (let ((tools (remove-if (lambda (tl)
 			    (member (tool-name tl) *subagent-tool-names*
 				    :test #'string=))
@@ -54,7 +53,7 @@
 		       limit))))
 
 (defun run-subagents (tasks limit turns)
-  "TASKS run on the subagent model, *MAX-PARALLEL-SUBAGENTS* at a time."
+  "Run multiple TASKS on subagents, *MAX-PARALLEL-SUBAGENTS* at a time."
   (let* ((tasks (if (stringp tasks)
 		    (list tasks)
 		    (remove-if-not #'stringp tasks)))

@@ -15,3 +15,6 @@
 (defvar *subagent-loop*)
 (defvar *subagent-report-limit*)
 (defvar *subagent-brief-limit*)
+
+;; Used by subagent.lisp, defined in loop.lisp.
+(defvar *trace-lock*)

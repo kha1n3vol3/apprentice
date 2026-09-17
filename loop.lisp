@@ -4,6 +4,7 @@
 
 
 (defun dispatch-tool (name args tools)
+  "Runs tool with NAME with ARGS."
   (let ((tl (find name tools :key #'tool-name :test #'string=)))
     (cond
       ((null tl) (format nil "Unknown tool: ~a" name))
@@ -19,9 +20,7 @@
 	 (error (e) (format nil "Tool ~a failed: ~a" name e)))))))
 
 (defun tool-output (name args tools)
-  "DISPATCH-TOOL's string, never empty. Finding nothing is a real answer,
-   but providers reject an empty text block, so it has to be said out
-   loud rather than sent as \"\"."
+  "String wrapping around DISPATCH-TOOL"
   (let ((result (dispatch-tool name args tools)))
     (if (or (null result)
 	    (and (stringp result) (string= result "")))
@@ -198,8 +197,7 @@
 			  (escalate-after *escalate-after*)
 			&allow-other-keys)
   "The standard loop with one addition: once ESCALATE-AFTER subagent
-   tasks have run, the primary is handed the standard tool kit, so a run
-   that is not converging through delegation can work directly instead."
+   tasks have run, the primary is handed the standard tool kit."
   (let ((*max-parallel-calls* max-parallel-calls)
 	(opts      (model-options options))
 	(msgs      (seed-messages system-prompt prompt history))

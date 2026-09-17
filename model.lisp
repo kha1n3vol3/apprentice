@@ -43,7 +43,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun param-row-form (row)
-    "Expansion-time: one DEFMODEL :PARAMS row to a form building a PARAM."
+    "Expands ROW in DEFMODEL into the struct definition for PARAM."
     (let* ((name (first row))
 	   (rest (rest row))
 	   (key (if (stringp (first rest))
@@ -60,7 +60,7 @@
 				    ,as))))))
 
 (defun param-pair (param options)
-  "The JSON key and value PARAM contributes, or NIL to omit it."
+  "Converts PARAM with declared OPTIONS to a JSON key-value pair."
   (let ((value (getf options (param-name param) (param-default param))))
     (unless (eq value :none)
       (list (cons (intern (param-key param) :keyword)
@@ -69,6 +69,7 @@
 		      value))))))
 
 (defun check-options (params options)
+  "Checks that provided OPTIONS are valid according to PARAMS."
   (loop for (key nil) on options by #'cddr
 	unless (find key params :key #'param-name)
 	  do (error "Unknown option ~s. This model accepts: ~{~s~^, ~}"
@@ -79,9 +80,7 @@
 
 
 (defun format-messages (msgs formatter)
-  "Accumulates (values MESSAGES TOP-LEVEL-FIELDS). A formatter returns a
-   list of messages and, optionally, fields for the top level of the
-   request body."
+  "Formats MSGS given the provided FORMATTER."
   (let ((out nil) (top-level-fields nil))
     (dolist (msg msgs (values out top-level-fields))
       (multiple-value-bind (ms fs) (funcall formatter msg)
@@ -93,6 +92,7 @@
 
 
 (defun build-request-json (params options msgs top-level-fields tools messages-key)
+  "Creates request JSON for model endpoint."
   (lisp-to-json-string
    (append (loop for p in params append (param-pair p options))
 	   top-level-fields
@@ -123,10 +123,6 @@
       (or (s err "message") (format nil "~s" err))))
 
 (defun decode-response (body)
-  "BODY as decoded JSON. A transport failure -- a dead endpoint, a
-   timeout, an HTML error page from a proxy -- is not JSON, so it is
-   turned into the error shape every PARSE already understands rather
-   than being left to blow up in the reader."
   (let ((text (and (stringp body) (plusp (length body)) body)))
     (handler-case (json:decode-json-from-string text)
       (error ()
@@ -143,9 +139,6 @@
 			   messages-key
 			   format-tool
 			   parse)
-  "FORMAT-MESSAGE, FORMAT-TOOL and PARSE are bodies, not functions:
-   they see MSG, TOOL and RAW. FORMAT-MESSAGE returns a LIST, so one
-   record can become none, one, or several messages."
   (let ((var (intern (format nil "*~:@(~a~)-MODEL*" name))))
     `(defparameter ,var
        (make-model
@@ -183,7 +176,6 @@
 
 
 (defun tool->openai (tool)
-  "One TOOL struct as an OpenAI-format function definition."
   (j "type" "function"
      "function" (j "name" (tool-name tool)
                    "description" (tool-description tool)

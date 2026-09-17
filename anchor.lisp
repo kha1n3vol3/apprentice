@@ -45,11 +45,13 @@
 
 
 (defun process-anchor (anchor files)
+  "Apply ANCHOR's process function on FILES."
   (let ((process-fn (anchor-process-fn anchor)))
     (funcall process-fn files)))
 
 
 (defun process-dir (anchors dir)
+  "Process each anchor in ANCHORS for files in DIR."
   (let ((files (create-files-from-dir dir)))
     (loop for anchor in anchors do
       (process-anchor anchor files))))
@@ -70,6 +72,8 @@
     path))
 
 (defun save-anchors (&optional (dir *anchor-dir*))
+  "Save currently loaded anchors by applying their serialize
+   functions. Uses provided *ANCHOR-DIR*."
   (when (and dir *anchors*)
     (let ((folder (create-apprentice-folder dir)))
       (dolist (anchor *anchors*)
@@ -77,6 +81,7 @@
       folder)))
 
 (defun load-anchor (anchor dir)
+  "Loads ANCHOR from a DIR by using its deserialize function."
   (setf (anchor-bindings anchor)
 	(funcall (anchor-init-bindings-fn anchor)))
   (let ((folder (apprentice-folder dir)))

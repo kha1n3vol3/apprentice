@@ -94,6 +94,21 @@
     (uiop:native-namestring
      (or (ignore-errors (uiop:resolve-symlinks path)) path))))
 
+(defun resolve-path (path)
+  (uiop:resolve-symlinks path))
+
+(defun resolve-directory (dir)
+  (resolve-path (uiop:ensure-directory-pathname dir)))
+
+(defun is-parent (parent child)
+  "True when CHILD resolves to a location inside PARENT. A path that
+   cannot be resolved at all counts as outside: checks fail closed."
+  (handler-case
+      (let ((p (resolve-directory parent))
+            (c (resolve-path child)))
+        (when (uiop:subpathp c p) t))
+    (error () nil)))
+
 
 ;;;; Path Trees
 

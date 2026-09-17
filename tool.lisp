@@ -15,33 +15,20 @@
 
 
 (defun run-tool-checks (tool json-response)
+  "Ensure pre-defined tool checks for TOOL pass."
   (let* ((checks (tool-checks tool)))
     (loop for check in checks
           collect
           (funcall check json-response))))
 
 (defun run-tool (tool json-response)
+  "Run a TOOL with JSON-RESPONSE as input."
   (funcall (tool-fn tool)
            json-response))
 
 
 ;;;; Permission Directories
 
-
-(defun resolve-path (path)
-  (uiop:resolve-symlinks path))
-
-(defun resolve-directory (dir)
-  (resolve-path (uiop:ensure-directory-pathname dir)))
-
-(defun is-parent (parent child)
-  "True when CHILD resolves to a location inside PARENT. A path that
-   cannot be resolved at all counts as outside: checks fail closed."
-  (handler-case
-      (let ((p (resolve-directory parent))
-            (c (resolve-path child)))
-        (when (uiop:subpathp c p) t))
-    (error () nil)))
 
 (defun is-allowed-path (dirs path)
   (and (uiop:absolute-pathname-p path)
@@ -68,9 +55,8 @@
     "pip show" "pip list" "npm list" "cargo metadata"
     "df " "du " "free " "top -bn" "ps "
     "curl -I" "curl --head"
-    ;; Routine filesystem scaffolding. Trailing space = word boundary, so
-    ;; "cp " matches "cp a b" but not "cpufetch". rm stays off the list by
-    ;; design; use LITTLE_CODER_BASH_ALLOW=rm if a deployment needs it.
+    ;; A trailing space marks a word boundary, so "cp " matches "cp a b"
+    ;; but not "cpufetch". rm is left off on purpose.
     "cp " "mv " "mkdir " "touch ")
   "Command prefixes permitted without confirmation.")
 
@@ -85,9 +71,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun param-schema-form (ptype pdesc)
-    "Expansion-time: one parameter's JSON schema. A type written as
-     (:array :string) also gets the items schema an array needs, since
-     providers reject an array without one."
+    "One parameter's schema expanded into JSON."
     (if (consp ptype)
 	`(j "type"        ,(string-downcase (symbol-name (first ptype)))
 	    "description" ,pdesc
@@ -312,7 +296,7 @@
 
 
 (deftool file-tree
-  "Show the directory structure of an indexed directory as a tree, without touching disk again. Tool only works if the file-tree anchor is enabled for this directory."
+  "Show the directory structure of an indexed directory as a tree. Tool only works if the file-tree anchor is enabled for this directory."
   ()
   :checks (((gethash 'paths (anchor-bindings *file-tree-anchor*))
 	    "The file tree index is empty or not enabled for this directory."))
@@ -322,9 +306,7 @@
 	(truncate-output (format-tree tree) 6000)))
 
 (deftool dense-vector-search
-  "Search indexed files by meaning rather than exact text. Returns the most relevant chunks
-   as path with a similarity score. Use it when you do not know the exact name or wording to
-   grep for. Tool only works if an anchor directory is defined."
+  "Search indexed files by meaning rather than exact text. Returns the most relevant chunks as path with a similarity score. Tool only works if an anchor directory is defined."
   ((query :string "What to look for, described in plain language")
    &optional
    (limit :integer "Maximum number of passages to return, default 5"))
@@ -344,12 +326,10 @@
 
 
 ;;;; Sub-Agent Tools
-;;;;
-;;;; The helpers these call live in subagent.lisp.
 
 
 (deftool subagent
-  "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together, so send independent pieces of work in one call rather than one at a time. Each subagent starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Never give two tasks in the same call the same file to edit, since they would overwrite each other."
+  "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together. Each subagent starts with no memory of this conversation, so give it everything it needs."
   ((tasks (:array :string) "One complete, self-contained instruction per subagent")
    &optional
    (turns :integer "How many turns each subagent may take before it must answer with whatever it has"))
@@ -359,7 +339,7 @@
   :fn (run-subagents tasks *subagent-report-limit* turns))
 
 (deftool subagent-brief
-  "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together, so send independent pieces of work in one call rather than one at a time. Each subagent starts with no memory of this conversation, so give it everything it needs: absolute paths, exactly what to look for or change, and what to report back. Never give two tasks in the same call the same file to edit, since they would overwrite each other. Each reply is cut short after a small number of characters, so ask for brief reports -- findings and evidence only, no narration -- or the ends of the answers are lost."
+  "Delegate work to subagents that can read, write and edit files and run shell commands. Pass a list of tasks: they run at the same time and come back together. Each subagent starts with no memory of this conversation, so give it everything it needs. Each reply is cut short after a small number of characters, so ask for brief reports."
   ((tasks (:array :string) "One complete, self-contained instruction per subagent")
    &optional
    (turns :integer "How many turns each subagent may take before it must answer with whatever it has"))
@@ -412,6 +392,7 @@
 
 
 ;;;; Tool Bundles
+
 
 (defparameter *standard-tools*
   (list *grep-tool* *read-tool* *write-tool* *bash-tool* *web-search-tool*
