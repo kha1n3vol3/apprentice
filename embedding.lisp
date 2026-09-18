@@ -67,6 +67,11 @@
 ;;;; Embedding Client
 
 
+;; Served by llama.cpp with an embedding model, on its own port:
+;;
+;;   llama-server -m /path/to/embedding-model.gguf --embeddings --port 8081
+;;
+;; Separate from the chat server on 8080, which cannot do both at once.
 (defvar *embedding-endpoint* "http://localhost:8081/v1/embeddings")
 
 (defun create-embedding (input &key (endpoint *embedding-endpoint*) (model "default"))
