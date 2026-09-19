@@ -22,7 +22,14 @@ system-index.txt
 # Anchor caches
 .apprentice/
 
-# Beads / Dolt files (added by bd init)
+# Local planning and tooling documents
+git*.md
+openai-device-auth.md
+.pi-lens.json
+/housekeeping/
+
+# Beads / Dolt files
+.beads/
 .dolt/
 *.db
 .beads-credential-key
